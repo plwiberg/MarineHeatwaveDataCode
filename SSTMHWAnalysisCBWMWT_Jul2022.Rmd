@@ -1,0 +1,409 @@
+---
+title: "SST MHW Simulations - CBWMWT"
+output:
+  html_document:
+    df_print: paged
+---
+
+July 2022
+
+This analysis is focused on modeling effects of trends in SST mean and variance following Oliver 2019. The site is at the former location of NOAA NDBC CHLV2, east of the mouth of Chesapeake Bay. 
+
+This block reads in data and calculates values needed for model (mean, variance, tau, se)
+
+```{r}
+library(lubridate)
+XDdf=read.csv("SST_COC_CBW_Jul2022.csv") #meas WT avgd over LST
+Xdf=XDdf[,c(6,11,16)] #CBWMWT WTDA, seas, anom
+dt=mdy(XDdf$dt)
+dd=decimal_date(dt)
+Ddf=data.frame(dt,dd,year(dt),month(dt),day(dt))
+colnames(Ddf)=c("Date","DecY","Y","M","D")
+```
+
+```{r}
+LD=length(Ddf$Y)
+ild=which(Ddf$M==2&Ddf$D==29)
+if (length(ild)>0) Ddf=Ddf[-ild,]
+YV=unique(Ddf$Y)
+NY=length(YV)
+
+NR=length(Ddf$Y)
+LX=dim(Xdf)[1]
+print(c(NY,NR,LX,LD))
+
+if(LX==LD & length(ild>0)) Xdf=Xdf[-ild,]
+if(LX!=LD & LX!=NR) print (c("input dataframes not same length"))
+```
+
+```{r}
+library(heatwaveR)
+Hdf=data.frame(Ddf$Date,Xdf[,1])
+colnames(Hdf)=c("t","temp")
+YHdf=Hdf; YHdf$Y=Ddf$Y; YHdf$DecY=Ddf$DecY
+Xmean=aggregate(YHdf$temp ~ YHdf$Y, FUN=mean, na.action=na.pass)
+colnames(Xmean)=c("Y","Tmean")
+Xclim=ts2clm(Hdf,climatologyPeriod = c("1987-01-01", "2016-12-31"), clmOnly=TRUE)
+Xthresh=Xclim$thresh[-60]  #ignore leapday
+XthV=rep(Xthresh,NY)
+Xseas=Xclim$seas[-60]  #ignore leapday
+XsV=rep(Xseas,NY)
+YHdf$tmseas=Hdf$temp-XsV
+SSTAnom=YHdf$tmseas
+fitmS=lm(YHdf$tmseas ~ YHdf$DecY)
+trend=fitmS$coefficients[1]+fitmS$coefficients[2]*YHdf$DecY
+Xtrend=fitmS$coefficients[2]
+Xincpt=fitmS$coefficients[1]
+Xtrci=confint(fitmS)[2,2]-fitmS$coefficients[2]
+YHdf$tdT=YHdf$tmseas-trend #detrend
+Xvar=aggregate(YHdf$tdT ~ YHdf$Y, FUN=var, na.action=na.pass)
+colnames(Xvar)=c("Y","Tvar")
+```
+
+```{r}
+Xhi=rep(0,NR); N28=Xhi
+Xhi[(Hdf$temp-XthV)>0]=1
+N28[Hdf$temp>=28]=1
+a28=aggregate(N28 ~ Ddf$Y, FUN=sum, na.action=na.pass)    
+colnames(a28)=c("Y","abv28")
+Xa28=rep(0,length(YV))
+Xa28[a28$Y-YV[1]+1]=a28$abv28
+frachi=sum(Xhi)/NR
+dX=diff(Xhi)
+nd = which(dX==1)
+np = which(dX==-1)
+if (np[1]<nd[1]) np=np[-1]
+if (length(np) != length(nd)) nd=nd[-length(nd)]
+durXHi=np-nd
+n5=which(durXHi>=5)
+
+Dexp=aggregate(durXHi[n5] ~ Ddf$Y[nd[n5]], FUN=sum, na.action=na.pass)
+Ddur=aggregate(durXHi[n5] ~ Ddf$Y[nd[n5]], FUN=mean, na.action=na.pass)
+colnames(Dexp)=c("Y","expMHW")
+colnames(Ddur)=c("Y","durMHW")
+Xexp=rep(0,length(YV))
+Xexp[Dexp$Y-YV[1]+1]=Dexp$expMHW
+Xdur=rep(0,length(YV))
+Xdur[Ddur$Y-YV[1]+1]=Ddur$durMHW
+
+inten=rep(0,length(n5))
+for (k in 1:length(n5)){
+  inten[k]=max(SSTAnom[nd[n5[k]]:np[n5[k]]])
+}
+Dint=aggregate(inten ~ Ddf$Y[nd[n5]], FUN=max, na.action=na.pass)
+colnames(Dint)=c("Y","intMHW")
+Xint=rep(0,length(YV))
+Xint[Dint$Y-YV[1]+1]=Dint$intMHW
+
+Dmhw=aggregate(nd[n5] ~ Ddf$Y[nd[n5]], FUN=NROW, na.action=na.pass)
+colnames(Dmhw)=c("Y","nMHW")
+Xmhw=rep(0,length(YV))
+Xmhw[Dmhw$Y-YV[1]+1]=Dmhw$nMHW
+```
+
+
+```{r}
+print(frachi)
+print(Xtrend)
+```
+
+```{r}
+plot(YV,Xint)
+fitint = lm(Xint ~ YV)
+abline(fitint)
+```
+
+```{r}
+plot(YV,Xexp)
+fitexp = lm(Xexp ~ YV)
+abline(fitexp)
+```
+
+```{r}
+plot(YV,Xa28)
+```
+
+```{r}
+plot(YV,Xdur)
+fitdur = lm(Xdur ~ YV)
+abline(fitdur)
+```
+
+
+```{r}
+plot(YV,Xmhw)
+fitmhw = lm(Xmhw ~ YV)
+abline(fitmhw)
+```
+
+Save values for plotting
+```{r}
+M = rbind(Xexp,Xint,Xdur,Xa28,Xmhw)
+#write.csv(M,"MHWCV.csv")
+```
+
+Calculate parameters for autoregressive model ala Oliver 2019
+
+```{r}
+fitL=lm(YHdf$tdT[2:NR]~YHdf$tdT[1:(NR-1)])
+slope=as.numeric(fitL$coefficients[2])
+sig_e=sd(fitL$residuals)          
+tau=-1/log(slope)
+
+print(c(slope,sig_e,tau))
+```
+
+Calculate 500 instances of SST time series using autoregressive model with parameters slope and se from above.
+
+```{r}
+NS=500  #number of simulations
+NR=length(Ddf$Y)
+YV=unique(Ddf$Y)
+NY=length(YV)
+Q=matrix(0,nrow=NR,ncol=NS)
+
+for (j in 1:NS){
+  Er = rnorm(NR,mean=0,sd=sig_e)
+  for (i in 2:NR) {Q[i,j] = slope*Q[i-1,j] + Er[i]}
+}
+```
+
+Add trend and seasonal cycle back into time series. 
+
+```{r}
+Qt=Q+trend  #add trend from SST data
+Qst=Qt+XsV   #add seasonal cycle to trend
+Qs=Q+XsV  #add seasonal cycle w/o trend
+XY=Ddf$Y
+```
+
+```{r}
+vQ=apply(Q,2,var)
+summary(vQ)
+var(SSTAnom)
+```
+
+Calculate exposure and intensity for simulated SST with trend included.
+
+```{r}
+Qexp=matrix(0,nrow=NY,ncol=NS); Qa28=Qexp; Qint=Qexp; Qdur=Qexp; Qmhw=Qexp
+frachi = rep(0,NS); cnt = matrix(0, nrow=NS, ncol=50)
+for (j in 1:NS) {
+  Xhi=rep(0,NR); N28=Xhi
+  Xhi[(Qst[,j]-XthV)>0]=1
+  S1=rle(Xhi)$lengths; T1=rle(Xhi)$values
+  U1=S1*T1;  E1=U1[-(which(U1==0))]
+  evtab = table(factor(E1, levels=1:50))
+  cnt[j,]=evtab
+  frachi[j]=sum(Xhi)/NR
+  dX=diff(Xhi)
+  nd = which(dX==1)
+  np = which(dX==-1)
+  if (np[1]<nd[1]) np=np[-1]
+  if (length(np) != length(nd)) nd=nd[-length(nd)]
+  durXHi=np-nd
+  n5=which(durXHi>=5)
+  inten=rep(0,length(n5))
+  for (k in 1:length(n5)){
+    inten[k]=max(Qt[nd[n5[k]]:np[n5[k]],j])
+  }
+  Dint=aggregate(inten ~ XY[nd[n5]], FUN=max, na.action=na.pass)
+  colnames(Dint)=c("Y","intMHW")
+  Sint=rep(0,NY)
+  Sint[Dint$Y-YV[1]+1]=Dint$intMHW
+  Qint[,j]=Sint
+  
+  Dexp=aggregate(durXHi[n5] ~ XY[nd[n5]], FUN=sum, na.action=na.pass)
+  colnames(Dexp)=c("Y","expMHW")
+  Sexp=rep(0,NY)
+  Sexp[Dexp$Y-YV[1]+1]=Dexp$expMHW
+  Qexp[,j]=Sexp
+  
+  N28[Qst[,j]>=28]=1
+  a28=aggregate(N28 ~ XY, FUN=sum, na.action=na.pass)    
+  colnames(a28)=c("Y","abv28")
+  Sa28=rep(0,NY)
+  Sa28[a28$Y-YV[1]+1]=a28$abv28
+  Qa28[,j]=Sa28
+  
+  Ddur=aggregate(durXHi[n5] ~ XY[nd[n5]], FUN=mean, na.action=na.pass)
+  colnames(Ddur)=c("Y","durMHW")
+  Sdur=rep(0,NY)
+  Sdur[Ddur$Y-YV[1]+1]=Ddur$durMHW
+  Qdur[,j]=Sdur
+  
+  Dmhw=aggregate(nd[n5] ~ XY[nd[n5]], FUN=NROW, na.action=na.pass)
+  colnames(Dmhw)=c("Y","nMHW")
+  Smhw=rep(0,NY)
+  Smhw[Dmhw$Y-YV[1]+1]=Dmhw$nMHW
+  Qmhw[,j]=Smhw
+}
+```
+
+
+```{r}
+boxplot(t(Qint),outpch=20, outcex=0.5)
+points(Xint,col="blue")
+```
+```{r}
+boxplot(t(Qexp),outpch=20, outcex=0.5)
+points(Xexp,col="red")
+```
+
+
+```{r}
+boxplot(t(Qa28),outpch=20, outcex=0.5)
+points(Xa28,col="green")
+```
+
+```{r}
+boxplot(t(Qdur),outpch=20, outcex=0.5)
+points(Xdur,col="purple")
+```
+
+```{r}
+boxplot(t(Qmhw),outpch=20, outcex=0.5)
+points(Xmhw,col="orange")
+```
+
+Calculate exceedance events and durations
+
+```{r, warning=FALSE}
+library(reshape2)
+library(ggplot2)
+library(patchwork)
+mcnt = matrix(0, nrow=500, ncol=4); lcnt=mcnt
+dcnt=cnt*matrix(rep(1:50,500), byrow=TRUE, nrow=500)
+for (i in 1:500) {
+  n4=sum(cnt[i,1:4])
+  n10=sum(cnt[i,5:10])
+  n20=sum(cnt[i,11:20])
+  n50=sum(cnt[i,21:50])
+  mcnt[i,]=c(n4,n10,n20,n50)
+  d4=sum(dcnt[i,1:4])
+  d10=sum(dcnt[i,5:10])
+  d20=sum(dcnt[i,11:20])
+  d50=sum(dcnt[i,21:50])
+  lcnt[i,]=c(d4,d10,d20,d50)
+}
+cdf=data.frame(mcnt/NY)
+colnames(cdf)=c("D4","D10","D20","D50")
+cmdf=melt(cdf, id=NULL)
+ddf=data.frame(lcnt/NY)
+colnames(ddf)=c("D4","D10","D20","D50")
+dmdf=melt(ddf, id=NULL)
+g1=ggplot(data=cmdf, aes(x=variable, y=value, color=variable)) +
+  geom_boxplot() +
+  ylab("Exceedance events/year")
+g2=ggplot(data=dmdf, aes(x=variable, y=value, color=variable)) +
+  geom_boxplot() +
+  ylab("Exceedance days/year")
+print(g1+g2)
+#write.csv(cbind(cdf,ddf),"EvCntCV.csv")
+```
+
+**Extend simulations to 2100**
+
+```{r}
+NS=500  #number of simulations
+NY=120 #number of years
+NR=NY*365 #record length in days
+Z=matrix(0,nrow=NR,ncol=NS)
+decY=0:(NY*365)/365+1982; decY=decY[-(length(decY))]
+YMD=date_decimal(decY); YMD=as.Date(YMD); M=month(YMD);
+ZY=year(YMD)
+YV=unique(ZY)
+
+for (j in 1:NS){
+  Er = rnorm(NR,mean=0,sd=sig_e)
+  for (i in 2:NR) {Z[i,j] = slope*Z[i-1,j] + Er[i]}
+}
+
+Ztrend=fitmS$coefficients[1]+fitmS$coefficients[2]*decY
+ZsV=rep(Xseas,NY)
+Zt=Z+Ztrend  #add trend from SST data
+Zst=Zt+ZsV   #add seasonal cycle to trend
+ZthV=rep(Xthresh,NY)
+
+```
+
+Calculate MHWs
+
+```{r}
+Zexp=matrix(0,nrow=NY,ncol=NS); Za28=Zexp; Zint=Zexp; Zdur=Zexp; Zmhw=Zexp
+frachi = rep(0,NS)
+for (j in 1:NS) {
+  Xhi=rep(0,NR); N28=Xhi
+  Xhi[(Zst[,j]-ZthV)>0]=1
+  frachi[j]=sum(Xhi)/NR
+  dX=diff(Xhi)
+  nd = which(dX==1)
+  np = which(dX==-1)
+  if (np[1]<nd[1]) np=np[-1]
+  if (length(np) != length(nd)) nd=nd[-length(nd)]
+  durXHi=np-nd
+  n5=which(durXHi>=5)
+  inten=rep(0,length(n5))
+  for (k in 1:length(n5)){
+    inten[k]=max(Zt[nd[n5[k]]:np[n5[k]],j])
+  }
+  Dint=aggregate(inten ~ ZY[nd[n5]], FUN=max, na.action=na.pass)
+  colnames(Dint)=c("Y","intMHW")
+  Sint=rep(0,NY)
+  Sint[Dint$Y-YV[1]+1]=Dint$intMHW
+  Zint[,j]=Sint
+  
+  Dexp=aggregate(durXHi[n5] ~ ZY[nd[n5]], FUN=sum, na.action=na.pass)
+  colnames(Dexp)=c("Y","expMHW")
+  Sexp=rep(0,NY)
+  Sexp[Dexp$Y-YV[1]+1]=Dexp$expMHW
+  Zexp[,j]=Sexp
+  
+  N28[Zst[,j]>=28]=1
+  a28=aggregate(N28 ~ ZY, FUN=sum, na.action=na.pass)    
+  colnames(a28)=c("Y","abv28")
+  Sa28=rep(0,NY)
+  Sa28[a28$Y-YV[1]+1]=a28$abv28
+  Za28[,j]=Sa28
+  
+  Ddur=aggregate(durXHi[n5] ~ ZY[nd[n5]], FUN=mean, na.action=na.pass)
+  colnames(Ddur)=c("Y","durMHW")
+  Sdur=rep(0,NY)
+  Sdur[Ddur$Y-YV[1]+1]=Ddur$durMHW
+  Zdur[,j]=Sdur
+  
+  Dmhw=aggregate(nd[n5] ~ ZY[nd[n5]], FUN=NROW, na.action=na.pass)
+  colnames(Dmhw)=c("Y","nMHW")
+  Smhw=rep(0,NY)
+  Smhw[Dmhw$Y-YV[1]+1]=Dmhw$nMHW
+  Zmhw[,j]=Smhw
+}
+```
+
+
+```{r}
+boxplot(t(Zint),outpch=20, outcex=0.5)
+points(Xint,col="blue")
+```
+
+```{r}
+boxplot(t(Zexp),outpch=20, outcex=0.5)
+points(Xexp,col="red")
+```
+
+```{r}
+boxplot(t(Za28),outpch=20, outcex=0.5)
+points(Xa28,col="green")
+```
+
+```{r}
+boxplot(t(Zdur),outpch=20, outcex=0.5)
+points(Xdur,col="purple")
+```
+
+```{r}
+boxplot(t(Zmhw),outpch=20, outcex=0.5)
+points(Xmhw,col="orange")
+```
+
+
