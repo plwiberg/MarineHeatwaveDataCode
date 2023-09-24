@@ -8,7 +8,7 @@ The following .csv files have the average SST grids for the 12-25 June 2015 mari
 <br>  RUAVHRR_June2015MHW.csv - from Rutgers Center for Ocean Observing Leadership remote sensing data products: https://rucool.marine.rutgers.edu/integrated-ocean-technology/remote-sensing/
   
 
-The following .html (with embedded graphics) and .Rmd (R notebook with code) files run simulations of SST from 1982-2100, including calculation of AR1 model parameters (see Figure 5; Tables 1 & 2). These use the included datafile: SST_COC_CBW_Jul2022.csv.
-<br>  SSTMHWAnalysisCBWMWT_Jul2022.html, SSTMHWAnalysisCBWMWT_Jul2022.Rmd - for CBWMWT (measured water temperature at coastal bay site at Wachapreague, VA)
-<br>  SSTMHWAnalysisCOCMWT_Jul2022.html, SSTMHWAnalysisCOCMWT_Jul2022.Rmd - for COCMWT (measured SST at coastal ocean location of NOAA NDBC CHLV2)
-<br>  SSTMHWAnalysisCOCOI_Jul2022.html, SSTMHWAnalysisCOCOI_Jul2022.Rmd - for COCOI (OISST-V2 SST at coastal ocean location of NOAA NDBC CHLV2)
+The following .html (with embedded graphics) and .Rmd (R notebook with code) files run simulations of SST from 1982-2100, including calculation of AR1 model parameters (see Figure 5; Tables 1 & 2). These use the included datafile: SST_COC_CBW_Aug2023.csv.
+<br>  SSTMHWAnalysisCBWMWT_Aug2023.html, SSTMHWAnalysisCBWMWT_Aug2023.Rmd - for CBWMWT (measured water temperature at coastal bay site at Wachapreague, VA)
+<br>  SSTMHWAnalysisCOCMWT_Aug2023.html, SSTMHWAnalysisCOCMWT_Aug2023.Rmd - for COCMWT (measured SST at coastal ocean location of NOAA NDBC CHLV2)
+<br>  SSTMHWAnalysisCOCOI_Aug2023.html, SSTMHWAnalysisCOCOI_Aug2023.Rmd - for COCOI (OISST-V2 SST at coastal ocean location of NOAA NDBC CHLV2)
