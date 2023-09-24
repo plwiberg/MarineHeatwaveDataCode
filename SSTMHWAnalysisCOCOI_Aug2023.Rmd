@@ -1,0 +1,514 @@
+---
+title: "SST MHW Simulations - COCOI"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+August 2023
+
+This analysis is focused on modeling effects of trends in SST mean and variance following Oliver 2019. This record is from the OISST-V2.1 gridded daily SST dataset at the former NOAA NDBC CHLV2 site, east of the mouth of Chesapeake Bay. The record extends from 1982-2021 (40 years).
+
+This block reads in data.
+
+```{r}
+library(lubridate)
+XDdf=read.csv("SST_COC_CBW_Aug2023.csv") 
+Xts=XDdf$COCOI #COCOI daily SST
+dt=mdy(XDdf$dt)
+dd=decimal_date(dt)
+Ddf=data.frame(dt,dd,year(dt),month(dt),day(dt))
+colnames(Ddf)=c("Date","DecY","Y","M","D")
+```
+
+Check lengths
+
+```{r}
+LD=length(Ddf$Y)
+ild=which(Ddf$M==2&Ddf$D==29)
+if (length(ild)>0) Ddf=Ddf[-ild,]
+YV=unique(Ddf$Y)
+NY=length(YV)
+
+NR=length(Ddf$Y)
+LX=length(Xts)
+print(c(NY,NR,LX,LD))
+
+if(LX==LD & length(ild>0)) Xts=Xts[-ild]
+if(LX!=LD & LX!=NR) print (c("input dataframes not same length"))
+```
+
+Run marine heatwave code heatwaveR
+
+```{r}
+library(heatwaveR)
+Hdf=data.frame(Ddf$Date,Xts)
+colnames(Hdf)=c("t","temp")
+YHdf=Hdf; YHdf$Y=Ddf$Y; YHdf$DecY=Ddf$DecY
+Xclim=ts2clm(Hdf,climatologyPeriod = c("1987-01-01", "2016-12-31"), clmOnly=TRUE)
+Xthresh=Xclim$thresh[-60]  #ignore leapday; MHW threshold
+XthV=rep(Xthresh,NY)
+Xseas=Xclim$seas[-60]  #ignore leapday; climatology
+XsV=rep(Xseas,NY)
+YHdf$tmseas=Hdf$temp-XsV
+SSTAnom=YHdf$tmseas  #SST anomaly
+```
+
+Calculate statistics for time series (mean and variance)
+
+```{r}
+#calculate annual mean SST
+Xmean=aggregate(YHdf$temp ~ YHdf$Y, FUN=mean, na.action=na.pass)
+colnames(Xmean)=c("Y","Tmean")
+XMM=t.test(Xmean$Tmean, na.rm=TRUE)  #confint on mean SST
+fitmS=lm(YHdf$tmseas ~ YHdf$DecY)  #trend on daily SST anomaly
+trend=fitmS$coefficients[1]+fitmS$coefficients[2]*YHdf$DecY
+YHdf$tdT=YHdf$tmseas-trend #detrend SST time series
+#calculate annual variance
+Xvar=aggregate(YHdf$tdT ~ YHdf$Y, FUN=var, na.action=na.pass)
+colnames(Xvar)=c("Y","Tvar")
+XVM=t.test(Xvar$Tvar, na.rm=TRUE)  #confint on mean variance
+fitam=lm(Xmean$Tmean~Xmean$Y) #trend on annual mean SST
+print(paste("ann mean SST =", format(XMM$estimate,digits=3),"+/-",format(XMM$conf.int[2]-XMM$estimate,digits=1)))
+print(paste("ann mean SST trend =",format(fitam$coefficients[2],  digits=3),"+/-",format(confint(fitam)[2,2]-fitam$coefficients[2], digits=3)))
+print(paste("p = ", format(summary(fitam)$coefficients[2,4],digits=3)))
+fitav=lm(Xvar$Tvar~Xvar$Y)  #trend on annual variance
+print(paste("ann SST var =", format(XVM$estimate,digits=3),"+/-",format(XVM$conf.int[2]-XVM$estimate,digits=2)))
+print(paste("ann SST var trend =",format(fitav$coefficients[2],  digits=3),"+/-",format(confint(fitav)[2,2]-fitav$coefficients[2], digits=3)))
+print(paste("p = ", format(summary(fitav)$coefficients[2,4],digits=3)))
+```
+
+Calculate MHW stats
+
+```{r}
+Xhi=rep(0,NR); N28=Xhi
+Xhi[(Hdf$temp-XthV)>0]=1
+N28[Hdf$temp>=28]=1
+a28=aggregate(N28 ~ Ddf$Y, FUN=sum, na.action=na.pass)    
+colnames(a28)=c("Y","abv28")
+Xa28=rep(0,length(YV))
+Xa28[a28$Y-YV[1]+1]=a28$abv28
+frachi=sum(Xhi)/NR
+dX=diff(Xhi)
+nd = which(dX==1)
+np = which(dX==-1)
+if (np[1]<nd[1]) np=np[-1]
+if (length(np) != length(nd)) nd=nd[-length(nd)]
+durXHi=np-nd
+n5=which(durXHi>=5)
+
+Dexp=aggregate(durXHi[n5] ~ Ddf$Y[nd[n5]], FUN=sum, na.action=na.pass)
+Ddur=aggregate(durXHi[n5] ~ Ddf$Y[nd[n5]], FUN=mean, na.action=na.pass)
+colnames(Dexp)=c("Y","expMHW")
+colnames(Ddur)=c("Y","durMHW")
+Xexp=rep(0,length(YV))
+Xexp[Dexp$Y-YV[1]+1]=Dexp$expMHW
+Xdur=rep(0,length(YV))
+Xdur[Ddur$Y-YV[1]+1]=Ddur$durMHW
+
+inten=rep(0,length(n5))
+for (k in 1:length(n5)){
+  inten[k]=max(SSTAnom[nd[n5[k]]:np[n5[k]]])
+}
+Dint=aggregate(inten ~ Ddf$Y[nd[n5]], FUN=max, na.action=na.pass)
+colnames(Dint)=c("Y","intMHW")
+Xint=rep(0,length(YV))
+Xint[Dint$Y-YV[1]+1]=Dint$intMHW
+
+Dmhw=aggregate(nd[n5] ~ Ddf$Y[nd[n5]], FUN=NROW, na.action=na.pass)
+colnames(Dmhw)=c("Y","nMHW")
+Xmhw=rep(0,length(YV))
+Xmhw[Dmhw$Y-YV[1]+1]=Dmhw$nMHW
+```
+
+Print and plot MHW intensity mean and trend
+
+```{r out.width = "60%", fig.align = "center"}
+plot(YV,Xint)
+ciint=t.test(Xint, na.rm=TRUE)
+print(paste("mean ann MHW intensity =", format(ciint$estimate,digits=3),"+/-",format(ciint$conf.int[2]-ciint$estimate,digits=3)))
+fitint = lm(Xint ~ YV)
+pint = summary(fitint)$coefficients[2,4]
+if (pint<0.05) abline(fitint)
+print(paste("ann MHW int trend =",format(fitint$coefficients[2],  digits=3),"+/-",format(confint(fitint)[2,2]-fitint$coefficients[2], digits=3)))
+print(paste("p = ", format(pint,digits=3)))
+```
+
+Print and plot MHW exposure mean and trend
+
+```{r out.width = "60%", fig.align = "center"}
+plot(YV,Xexp)
+ciexp=t.test(Xexp, na.rm=TRUE)
+print(paste("mean ann MHW exposure =", format(ciexp$estimate,digits=3),"+/-",format(ciexp$conf.int[2]-ciexp$estimate,digits=3)))
+fitexp = lm(Xexp ~ YV)
+pexp = summary(fitexp)$coefficients[2,4]
+if (pexp<0.05) abline(fitexp)
+print(paste("ann MHW exp trend =",format(fitexp$coefficients[2],  digits=3),"+/-",format(confint(fitexp)[2,2]-fitexp$coefficients[2], digits=3)))
+print(paste("p = ", format(pexp,digits=3)))
+```
+
+Print and plot SST >=28C mean and trend
+
+```{r out.width = "60%", fig.align = "center"}
+plot(YV,Xa28)
+cia28=t.test(Xa28, na.rm=TRUE)
+print(paste("mean days >= 28C =", format(cia28$estimate,digits=3),"+/-",format(cia28$conf.int[2]-cia28$estimate,digits=3)))
+fita28 = lm(Xa28 ~ YV)
+pa28 = summary(fita28)$coefficients[2,4]
+if (pa28<0.05) abline(fita28)
+print(paste("SST >= 28C trend =",format(fita28$coefficients[2],  digits=3),"+/-",format(confint(fita28)[2,2]-fita28$coefficients[2], digits=3)))
+print(paste("p = ", format(pa28,digits=3)))
+```
+
+Print and plot MHW duration mean and trend
+
+```{r out.width = "60%", fig.align = "center"}
+plot(YV,Xdur)
+cidur=t.test(Xdur, na.rm=TRUE)
+print(paste("mean ann MHW duration =", format(cidur$estimate,digits=3),"+/-",format(cidur$conf.int[2]-cidur$estimate,digits=3)))
+fitdur = lm(Xdur ~ YV)
+pdur = summary(fitdur)$coefficients[2,4]
+if (pdur<0.05) abline(fitdur)
+print(paste("MHW duration trend =", format(fitdur$coefficients[2],  digits=3),"+/-",format(confint(fitdur)[2,2]-fitdur$coefficients[2], digits=3)))
+print(paste("p = ", format(pdur,digits=3)))
+```
+
+Print and plot MHW number mean and trend
+
+```{r out.width = "60%", fig.align = "center"}
+plot(YV,Xmhw)
+cimhw=t.test(Xmhw, na.rm=TRUE)
+print(paste("mean ann # MHWs =", format(cimhw$estimate,digits=3),"+/-",format(cimhw$conf.int[2]-cimhw$estimate,digits=3)))
+fitmhw = lm(Xmhw ~ YV)
+pmhw = summary(fitmhw)$coefficients[2,4]
+if (pmhw<0.05) abline(fitmhw)
+print(paste("Ann # MHWs trend =",format(fitmhw$coefficients[2],  digits=3),"+/-",format(confint(fitmhw)[2,2]-fitmhw$coefficients[2], digits=3)))
+print(paste("p = ", format(pmhw,digits=3)))
+```
+
+Save values for plotting
+
+```{r}
+M = rbind(Xexp,Xint,Xdur,Xa28,Xmhw)
+write.csv(M,"MHWCOCOI.csv")
+```
+
+Calculate parameters for autoregressive model ala Oliver 2019
+
+```{r}
+fitL=lm(YHdf$tdT[2:NR]~YHdf$tdT[1:(NR-1)])
+slope=as.numeric(fitL$coefficients[2])
+sig_e=sd(fitL$residuals)          
+tau=-1/log(slope)
+
+print(c(slope,sig_e,tau))
+```
+
+Calculate 500 instances of SST time series using autoregressive model with parameters slope and se from above.
+
+```{r}
+NS=500  #number of simulations
+NR=length(Ddf$Y)
+YV=unique(Ddf$Y)
+NY=length(YV)
+Q=matrix(0,nrow=NR,ncol=NS)
+
+for (j in 1:NS){
+  Er = rnorm(NR,mean=0,sd=sig_e)
+  for (i in 2:NR) {Q[i,j] = slope*Q[i-1,j] + Er[i]}
+}
+```
+
+Add trend and seasonal cycle back into time series. 
+
+```{r}
+Qt=Q+trend  #add trend from SST data
+Qst=Qt+XsV   #add seasonal cycle to trend
+Qs=Q+XsV  #add seasonal cycle w/o trend
+XY=Ddf$Y
+```
+
+```{r}
+vQ=apply(Q,2,var)
+summary(vQ)
+var(SSTAnom,na.rm=TRUE)
+```
+
+Calculate exposure and intensity for simulated SST with trend included.
+
+```{r}
+Qexp=matrix(0,nrow=NY,ncol=NS); Qa28=Qexp; Qint=Qexp; Qdur=Qexp; Qmhw=Qexp
+frachi = rep(0,NS); cnt = matrix(0, nrow=NS, ncol=50)
+for (j in 1:NS) {
+  Xhi=rep(0,NR); N28=Xhi
+  Xhi[(Qst[,j]-XthV)>0]=1
+  S1=rle(Xhi)$lengths; T1=rle(Xhi)$values
+  U1=S1*T1;  E1=U1[-(which(U1==0))]
+  evtab = table(factor(E1, levels=1:50))
+  cnt[j,]=evtab
+  frachi[j]=sum(Xhi)/NR
+  dX=diff(Xhi)
+  nd = which(dX==1)
+  np = which(dX==-1)
+  if (np[1]<nd[1]) np=np[-1]
+  if (length(np) != length(nd)) nd=nd[-length(nd)]
+  durXHi=np-nd
+  n5=which(durXHi>=5)
+  inten=rep(0,length(n5))
+  for (k in 1:length(n5)){
+    inten[k]=max(Qt[nd[n5[k]]:np[n5[k]],j])
+  }
+  Dint=aggregate(inten ~ XY[nd[n5]], FUN=max, na.action=na.pass)
+  colnames(Dint)=c("Y","intMHW")
+  Sint=rep(0,NY)
+  Sint[Dint$Y-YV[1]+1]=Dint$intMHW
+  Qint[,j]=Sint
+  
+  Dexp=aggregate(durXHi[n5] ~ XY[nd[n5]], FUN=sum, na.action=na.pass)
+  colnames(Dexp)=c("Y","expMHW")
+  Sexp=rep(0,NY)
+  Sexp[Dexp$Y-YV[1]+1]=Dexp$expMHW
+  Qexp[,j]=Sexp
+  
+  N28[Qst[,j]>=28]=1
+  a28=aggregate(N28 ~ XY, FUN=sum, na.action=na.pass)    
+  colnames(a28)=c("Y","abv28")
+  Sa28=rep(0,NY)
+  Sa28[a28$Y-YV[1]+1]=a28$abv28
+  Qa28[,j]=Sa28
+  
+  Ddur=aggregate(durXHi[n5] ~ XY[nd[n5]], FUN=mean, na.action=na.pass)
+  colnames(Ddur)=c("Y","durMHW")
+  Sdur=rep(0,NY)
+  Sdur[Ddur$Y-YV[1]+1]=Ddur$durMHW
+  Qdur[,j]=Sdur
+  
+  Dmhw=aggregate(nd[n5] ~ XY[nd[n5]], FUN=NROW, na.action=na.pass)
+  colnames(Dmhw)=c("Y","nMHW")
+  Smhw=rep(0,NY)
+  Smhw[Dmhw$Y-YV[1]+1]=Dmhw$nMHW
+  Qmhw[,j]=Smhw
+}
+```
+
+Plot simulation results
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Qint),outpch=20, outcex=0.5)
+points(Xint,col="blue")  #intensity
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Qexp),outpch=20, outcex=0.5)
+points(Xexp,col="red")  #exposure
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Qa28),outpch=20, outcex=0.5)
+points(Xa28,col="green")  #SST >=28C
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Qdur),outpch=20, outcex=0.5)
+points(Xdur,col="purple")  #duration
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Qmhw),outpch=20, outcex=0.5)
+points(Xmhw,col="orange")  #number of MHWs
+```
+
+Calculate and plot exceedance events and durations
+
+```{r, warning=FALSE, out.width = "60%", fig.align = "center"}
+library(reshape2)
+library(ggplot2)
+library(patchwork)
+mcnt = matrix(0, nrow=500, ncol=4); lcnt=mcnt
+dcnt=cnt*matrix(rep(1:50,500), byrow=TRUE, nrow=500)
+for (i in 1:500) {
+  n4=sum(cnt[i,1:4])
+  n10=sum(cnt[i,5:10])
+  n20=sum(cnt[i,11:20])
+  n50=sum(cnt[i,21:50])
+  mcnt[i,]=c(n4,n10,n20,n50)
+  d4=sum(dcnt[i,1:4])
+  d10=sum(dcnt[i,5:10])
+  d20=sum(dcnt[i,11:20])
+  d50=sum(dcnt[i,21:50])
+  lcnt[i,]=c(d4,d10,d20,d50)
+}
+cdf=data.frame(mcnt/NY)
+colnames(cdf)=c("D4","D10","D20","D50")
+cmdf=melt(cdf, id=NULL)
+ddf=data.frame(lcnt/NY)
+colnames(ddf)=c("D4","D10","D20","D50")
+dmdf=melt(ddf, id=NULL)
+g1=ggplot(data=cmdf, aes(x=variable, y=value, color=variable)) +
+  geom_boxplot() +
+  ylab("Exceedance events/year")
+g2=ggplot(data=dmdf, aes(x=variable, y=value, color=variable)) +
+  geom_boxplot() +
+  ylab("Exceedance days/year")
+print(g1+g2)
+#write.csv(cbind(cdf,ddf),"EvCntCV.csv")
+```
+
+**Extend simulations to 2100**
+
+```{r}
+NS=500  #number of simulations
+NY=120 #number of years
+NR=NY*365 #record length in days
+Z=matrix(0,nrow=NR,ncol=NS)
+decY=0:(NY*365)/365+1982; decY=decY[-(length(decY))]
+YMD=date_decimal(decY); YMD=as.Date(YMD); M=month(YMD);
+ZY=year(YMD)
+YV=unique(ZY)
+
+for (j in 1:NS){
+  Er = rnorm(NR,mean=0,sd=sig_e)
+  for (i in 2:NR) {Z[i,j] = slope*Z[i-1,j] + Er[i]}
+}
+
+Ztrend=fitmS$coefficients[1]+fitmS$coefficients[2]*decY
+ZsV=rep(Xseas,NY)
+Zt=Z+Ztrend  #add trend from SST data
+Zst=Zt+ZsV   #add seasonal cycle to trend
+ZthV=rep(Xthresh,NY)
+
+```
+
+Calculate MHWs
+
+```{r}
+Zexp=matrix(0,nrow=NY,ncol=NS); Za28=Zexp; Zint=Zexp; Zdur=Zexp; Zmhw=Zexp
+frachi = rep(0,NS)
+for (j in 1:NS) {
+  Xhi=rep(0,NR); N28=Xhi
+  Xhi[(Zst[,j]-ZthV)>0]=1
+  frachi[j]=sum(Xhi)/NR
+  dX=diff(Xhi)
+  nd = which(dX==1)
+  np = which(dX==-1)
+  if (np[1]<nd[1]) np=np[-1]
+  if (length(np) != length(nd)) nd=nd[-length(nd)]
+  durXHi=np-nd
+  n5=which(durXHi>=5)
+  inten=rep(0,length(n5))
+  for (k in 1:length(n5)){
+    inten[k]=max(Zt[nd[n5[k]]:np[n5[k]],j])
+  }
+  Dint=aggregate(inten ~ ZY[nd[n5]], FUN=max, na.action=na.pass)
+  colnames(Dint)=c("Y","intMHW")
+  Sint=rep(0,NY)
+  Sint[Dint$Y-YV[1]+1]=Dint$intMHW
+  Zint[,j]=Sint
+  
+  Dexp=aggregate(durXHi[n5] ~ ZY[nd[n5]], FUN=sum, na.action=na.pass)
+  colnames(Dexp)=c("Y","expMHW")
+  Sexp=rep(0,NY)
+  Sexp[Dexp$Y-YV[1]+1]=Dexp$expMHW
+  Zexp[,j]=Sexp
+  
+  N28[Zst[,j]>=28]=1
+  a28=aggregate(N28 ~ ZY, FUN=sum, na.action=na.pass)    
+  colnames(a28)=c("Y","abv28")
+  Sa28=rep(0,NY)
+  Sa28[a28$Y-YV[1]+1]=a28$abv28
+  Za28[,j]=Sa28
+  
+  Ddur=aggregate(durXHi[n5] ~ ZY[nd[n5]], FUN=mean, na.action=na.pass)
+  colnames(Ddur)=c("Y","durMHW")
+  Sdur=rep(0,NY)
+  Sdur[Ddur$Y-YV[1]+1]=Ddur$durMHW
+  Zdur[,j]=Sdur
+  
+  Dmhw=aggregate(nd[n5] ~ ZY[nd[n5]], FUN=NROW, na.action=na.pass)
+  colnames(Dmhw)=c("Y","nMHW")
+  Smhw=rep(0,NY)
+  Smhw[Dmhw$Y-YV[1]+1]=Dmhw$nMHW
+  Zmhw[,j]=Smhw
+}
+```
+
+Plot simulation results
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Zint),outpch=20, outcex=0.5)
+points(Xint,col="blue")  #intensity
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Zexp),outpch=20, outcex=0.5)
+points(Xexp,col="red")  #exposure
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Za28),outpch=20, outcex=0.5)
+points(Xa28,col="green")  #SST >= 28C
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Zdur),outpch=20, outcex=0.5)
+points(Xdur,col="purple")  #duration
+```
+
+```{r out.width = "60%", fig.align = "center"}
+boxplot(t(Zmhw),outpch=20, outcex=0.5)
+points(Xmhw,col="orange")  #number MHWs
+```
+
+Calculate and print trends on MHW simulation stats
+
+```{r}
+#intensity
+DIM=t.test(Zint[120,], na.rm=TRUE)
+print(paste("sim mean MHW intensity 2100 =", format(DIM$estimate,digits=3),"+/-",format(DIM$conf.int[2]-DIM$estimate,digits=1)))
+simfitint = lm(rowMeans(Zint) ~ YV) 
+spint = summary(simfitint)$coefficients[2,4]
+print(paste("sim MHW int trend =",format(simfitint$coefficients[2],  digits=3),"+/-",format(confint(simfitint)[2,2]-simfitint$coefficients[2], digits=3)))
+print(paste("p = ", format(spint,digits=3)))
+```
+
+```{r}
+#exposure
+DEM=t.test(Zexp[120,], na.rm=TRUE)
+print(paste("sim mean MHW exposure 2100 =", format(DEM$estimate,digits=3),"+/-",format(DEM$conf.int[2]-DEM$estimate,digits=1)))
+simfitexp = lm(rowMeans(Zexp) ~ YV)
+spexp = summary(simfitexp)$coefficients[2,4]
+print(paste("sim ann MHW exp trend =",format(simfitexp$coefficients[2],  digits=3),"+/-",format(confint(simfitexp)[2,2]-simfitexp$coefficients[2], digits=3)))
+print(paste("p = ", format(spexp,digits=3)))
+```
+
+```{r}
+#SST >= 28C
+DAM=t.test(Za28[120,], na.rm=TRUE)
+print(paste("sim mean SST>=28C 2100 =", format(DAM$estimate,digits=3),"+/-",format(DAM$conf.int[2]-DAM$estimate,digits=1)))
+simfita28 = lm(rowMeans(Za28) ~ YV)
+spa28 = summary(simfita28)$coefficients[2,4]
+print(paste("sim SST >= 28C trend =",format(simfita28$coefficients[2],  digits=3),"+/-",format(confint(simfita28)[2,2]-simfita28$coefficients[2], digits=3)))
+print(paste("p = ", format(spa28,digits=3)))
+```
+
+```{r}
+#duration
+DDM=t.test(Zdur[120,], na.rm=TRUE)
+print(paste("sim mean MHW duration 2100 =", format(DDM$estimate,digits=3),"+/-",format(DDM$conf.int[2]-DDM$estimate,digits=1)))
+simfitdur = lm(rowMeans(Zdur) ~ YV)
+spdur = summary(simfitdur)$coefficients[2,4]
+print(paste("sim MHW duration =", format(simfitdur$coefficients[2],  digits=3),"+/-",format(confint(simfitdur)[2,2]-simfitdur$coefficients[2], digits=3)))
+print(paste("p = ", format(spdur,digits=3)))
+```
+
+```{r}
+#number MHWs
+DHM=t.test(Zmhw[120,], na.rm=TRUE)
+print(paste("sim mean number MHWs 2100 =", format(DHM$estimate,digits=3),"+/-",format(DHM$conf.int[2]-DHM$estimate,digits=1)))
+simfitmhw = lm(rowMeans(Zmhw) ~ YV)
+spmhw = summary(simfitmhw)$coefficients[2,4]
+print(paste("Sim Ann # MHWs =",format(simfitmhw$coefficients[2],  digits=3),"+/-",format(confint(simfitmhw)[2,2]-simfitmhw$coefficients[2], digits=3)))
+print(paste("p = ", format(spmhw,digits=3)))
+```
+
